@@ -1,87 +1,276 @@
-Act as an Expert Python Developer specializing in the `pyTelegramBotAPI` (Telebot) library. I want you to write a complete, fully functional, and bug-free Telegram bot script (`main.py`) for a movie distribution bot. 
+import os
+import telebot
+from telebot import types
+import sqlite3
+from flask import Flask
+from threading import Thread
 
-### 1. Bot Setup & Infrastructure
-* **Token**: `8572682873:AAH5NW-kqxi_Lg1MLgEhmVODOe-B8NyuXeo`
-* **Admin ID**: `7908276494`
-* **Database**: Use `sqlite3`. Create a database named `abrsh.db` with two tables:
-  1. `users`: `user_id` (INTEGER PRIMARY KEY), `balance` (REAL, default 5.0), `first_name` (TEXT).
-  2. `movies`: `id` (INTEGER PRIMARY KEY AUTOINCREMENT), `name` (TEXT), `file_id` (TEXT), `price` (REAL), `category` (TEXT).
-* **Keep-Alive**: Include a basic Flask server and threading to keep the bot alive on Replit.
-* **Parse Mode**: Always use `parse_mode="Markdown"` when sending messages to render bold text.
+# --- 1. RENDER SERVER SETUP ---
+app = Flask(__name__)
+@app.route('/')
+def home(): 
+    return "ABRSH BOT IS ALIVE"
 
-### 2. Main Keyboard Menu & Welcome Photo
-When a user sends `/start`, register them in the DB (give 5.0 ETB default).
-Send them a photo using `bot.send_photo()`. The photo URL is `https://i.ibb.co/nH5gRkz/IMG-20260405-155116-584.jpg`.
-Set the caption to this EXACT welcome message (the markdown `**` makes it fully bold):
-"**※ ሰላም ይህ የ ABRSH Movies Bot ነው እንኳን በደህና መጡ!**\n\n**※ በትረጉም ፊልሞቻችን ይዝናኑ!**\n\n**※ ፊልም ልይ'ን ይጫኑ ና ደስታዎን ያስጀምሩ!**"
+def run_flask():
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
 
-Attach a `ReplyKeyboardMarkup` to this photo message with 3 rows (2 buttons per row):
-Row 1: [※ ፊልም ልይ!] [※ ያለኝ ሂሳብ!]
-Row 2: [※ ገቢ ላድርግ!] [※ ጎደኛዬን ልጋብዝ!]
-Row 3: [※ አጠቃቀም!] [※ DM ABRSH!]
+# --- 2. BOT CONFIGURATION ---
+# አዲሱ Token እዚህ ገብቷል
+TOKEN = "8572682873:AAH5NW-kqxi_Lg1MLgEhmVODOe-B8NyuXeo"
+ADMIN_ID = 7908276494 
+bot = telebot.TeleBot(TOKEN, parse_mode="Markdown")
 
-### 3. Admin Control Panel (Strictly for Admin ID)
-If the user ID matches the Admin ID during `/start`, send an additional message: "🛠 **Admin Control Panel:**" with an `InlineKeyboardMarkup` containing 3 vertical buttons:
-1. **📊 Bot Statics**: On click, show total user count and movie count in an alert popup.
-2. **📂 Upload Movies**: On click, ask the admin to send a video/document with the movie name in the caption. Use `register_next_step_handler`. Once received, show inline buttons for categories/prices (e.g., ⚫️ 0.5, 🟢 0.5, 🟡 0.3, 🔴 1.0, 🔵 0.5, ⚪️ 5.0). Save the selected data to the `movies` table.
-3. **⚙️ Edit Movies**: On click, fetch the last 10 movies from the DB and display them as inline buttons. If the admin clicks a movie, give two options: [💰 ዋጋ ቀይር] (Edit Price) and [❌ አጥፋ] (Delete). Allow deleting from DB or updating the price using `register_next_step_handler`.
+# --- 3. DATABASE SETUP ---
+def get_db():
+    conn = sqlite3.connect('abrsh_final.db', check_same_thread=False)
+    return conn
 
-### 4. Deposit & Payment Approval Flow (Accept/Reject)
-* When user clicks **"※ ገቢ ላድርግ!"**, reply EXACTLY:
-  "**⨳ ገቢ የሚያደርጉበት መንገድ ቴሌብር ነው!**\n\n**በዚህ +251961343796 ስልክ ቁጥር ከ5 ብር ጀምሮ በማስገባት Screen Shoot ላኩ።**"
-* **Screenshot Handler**: If a user sends a photo (screenshot), forward it to the Admin ID. Add inline buttons under the photo for the Admin: [✅ Accept] and [❌ Reject]. Reply to the user: "**⏳ ስክሪንሹቱ ተልኳል፣ አድሚኑ እስኪያረጋግጥ ይጠብቁ።**"
-* **Admin Accepts**: If Admin clicks Accept, bot asks the admin: "ስንት ብር ይግባለት?". Admin types the amount (e.g., 10). Update the user's balance in DB and send the user: "**✅ ውድ ተጠቃሚ {amount} ብር በካውንትዎ ላይ ተጨምሯል!**"
-* **Admin Rejects**: If Admin clicks Reject, send the user EXACTLY: "**ውድ {first_name} ጥያቄዎ አልተሳካም❎**"
+conn = get_db()
+c = conn.cursor()
+c.execute('CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, balance REAL DEFAULT 5.0, first_name TEXT)')
+c.execute('CREATE TABLE IF NOT EXISTS movies (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, file_id TEXT, price REAL, category TEXT)')
+conn.commit()
 
-### 5. Exact User Commands & Responses
-You MUST use these EXACT Amharic strings without changing a single character. All replies must be bolded using Markdown.
+user_states = {}
 
-* **"※ ፊልም ልይ!"**:
-  Ask: "**⨳ የሚፈልጉትን ፊልም ስም ይፃፉ!**"
-  Search the DB using `LIKE`. If found, list movies as inline buttons (e.g., `🎬 {name} - {price} ብር`). If clicked, check user balance. If balance is sufficient, deduct price and send the video. If not, alert: "❌ በቂ ሂሳብ የለዎትም!"
-  IF MOVIE NOT FOUND, reply EXACTLY:
-  "**⨳ በዚ ስም የተሰየመ ፊልም ማግኘት አልቻልኩም!**
-**⨳ ፊደል ተሳስተው እንዳይሆን ያረጋግጡ!**"
+# --- 4. KEYBOARDS ---
+def main_markup():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row("※ ፊልም ልይ!", "※ ያለኝ ሂሳብ!")
+    markup.row("※ ገቢ ላድርግ!", "※ ጎደኛዬን ልጋብዝ!")
+    markup.row("※ አጠቃቀም!", "※ DM ABRSH!")
+    return markup
 
-* **"※ ያለኝ ሂሳብ!"**:
-  Reply EXACTLY: "**⨳ ቀሪ ሂሳብ ~> {balance} ብር**"
+# --- 5. START COMMAND & ADMIN PANEL ---
+@bot.message_handler(commands=['start'])
+def start(message):
+    uid = message.from_user.id
+    fname = message.from_user.first_name
+    
+    # ተጠቃሚ መመዝገብ
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO users (user_id, balance, first_name) VALUES (?, ?, ?)", (uid, 5.0, fname))
+    conn.commit()
 
-* **"※ ጎደኛዬን ልጋብዝ!"**:
-  Reply EXACTLY:
-  "**ጓደኞችዎን ይጋብዙ ና ሽልማቶች ያግኙ! 🎉**
+    # ፎቶ እና ቦልድ የዌልካም ጽሁፍ
+    photo_url = "https://i.ibb.co/nH5gRkz/IMG-20260405-155116-584.jpg"
+    welcome_text = (
+        "**※ ሰላም ይህ የ ABRSH Movies Bot ነው እንኳን በደህና መጡ!**\n\n"
+        "**※ በትረጉም ፊልሞቻችን ይዝናኑ!**\n\n"
+        "**※ ፊልም ልይ'ን ይጫኑ ና ደስታዎን ያስጀምሩ!**"
+    )
+    
+    try:
+        bot.send_photo(message.chat.id, photo_url, caption=welcome_text, reply_markup=main_markup())
+    except:
+        bot.send_message(message.chat.id, welcome_text, reply_markup=main_markup())
 
-**የአብርሽን ፊልሞች እየኮመኮሙ እንዲደሰቱ ጓደኞችዎን ይጋብዙ!**
+    # አድሚን ከሆነ ፓነል አሳይ
+    if uid == ADMIN_ID:
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        kb.add(
+            types.InlineKeyboardButton("📊 Bot Statics", callback_data="adm_stats"),
+            types.InlineKeyboardButton("📂 Upload Movies", callback_data="adm_upload"),
+            types.InlineKeyboardButton("⚙️ Edit Movies", callback_data="adm_edit")
+        )
+        bot.send_message(message.chat.id, "🛠 **Admin Control Panel:**", reply_markup=kb)
 
-**1 ሰው ሲጋብዙ > 0.7 ብር ያገኛሉ!**
-**ከታች ያለውን ልዩ የግብዣ ሊንክዎን ለጓደኞችዎ ያጋሩ ።**
+# --- 6. ADMIN ACTIONS (STATS, UPLOAD, EDIT) ---
+@bot.callback_query_handler(func=lambda c: c.data.startswith("adm_"))
+def admin_callbacks(call):
+    if call.data == "adm_stats":
+        u = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        m = conn.execute("SELECT COUNT(*) FROM movies").fetchone()[0]
+        bot.answer_callback_query(call.id, f"Users: {u} | Movies: {m}", show_alert=True)
+    
+    elif call.data == "adm_upload":
+        msg = bot.send_message(ADMIN_ID, "**📂 ቪዲዮውን ይላኩ (Caption ላይ ስሙን ይጻፉ)...**")
+        bot.register_next_step_handler(msg, process_upload)
+    
+    elif call.data == "adm_edit":
+        movies = conn.execute("SELECT id, name FROM movies ORDER BY id DESC LIMIT 15").fetchall()
+        if not movies:
+            bot.answer_callback_query(call.id, "ምንም ፊልም የለም!")
+            return
+        kb = types.InlineKeyboardMarkup()
+        for mid, name in movies:
+            kb.add(types.InlineKeyboardButton(f"🎬 {name}", callback_data=f"emov_{mid}"))
+        bot.send_message(ADMIN_ID, "**⚙️ ማስተካከል የሚፈልጉትን ፊልም ይምረጡ፦**", reply_markup=kb)
 
-**https://t.me/ABRSHMovies_Bot?start=ref{user_id}**"
+# --- 7. EDIT & DELETE LOGIC ---
+@bot.callback_query_handler(func=lambda c: c.data.startswith("emov_"))
+def edit_options(call):
+    mid = call.data.split("_")[1]
+    kb = types.InlineKeyboardMarkup()
+    kb.row(types.InlineKeyboardButton("💰 ዋጋ ቀይር", callback_data=f"uprc_{mid}"),
+           types.InlineKeyboardButton("❌ አጥፋ", callback_data=f"delm_{mid}"))
+    bot.edit_message_text("**ምን ማድረግ ይፈልጋሉ?**", call.message.chat.id, call.message.message_id, reply_markup=kb)
 
-* **"※ DM ABRSH!"**:
-  Reply EXACTLY: "**የዚህ ቦት Owner👉 @ABRSHFILMBET**"
+@bot.callback_query_handler(func=lambda c: c.data.startswith(("uprc_", "delm_")))
+def handle_edit(call):
+    action, mid = call.data.split("_")
+    if action == "delm":
+        conn.execute("DELETE FROM movies WHERE id=?", (mid,))
+        conn.commit()
+        bot.answer_callback_query(call.id, "ተሰርዟል!")
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    elif action == "uprc":
+        msg = bot.send_message(ADMIN_ID, "**አዲሱን ዋጋ በቁጥር ብቻ ይላኩ፦**")
+        bot.register_next_step_handler(msg, lambda m: finish_price_edit(m, mid))
 
-* **"※ አጠቃቀም!"**:
-  Reply EXACTLY with this formatted list:
-**🧶 የICON ከለሮች ትርጉም።**
-**">">">">">">">">**
-**⚫️ -> ትርጉም ተከታታይ እና ሲንግል!**
-**🟢 -> ሲንግል!**
-**🟡 -> ተከታታይ ትርጉም!**
-**🔴 -> ሮማንስ ያለ ትርጉም!**
-**🔵 -> አማርኛ!**
-**🟣 -> ተከታታይ አማርኛ!**
-**🟠 -> ቃና ፊልሞች!**
-**⚪️ -> መፅሀፍት!**
-**">">">">">">">">**
-**💵 የፊልሞች ዋጋ**
-**💰ሲንግል -> 0.5 ብር።**
-**💰ተከታታይ -> 0.3 ብር።**
-**💰አማርኛ -> 0.5 ብር።**
-**💰ኢሮቲክ -> 1 ብር።**
-**💰ተከታታይ አማርኛ -> 0.5 ብር።**
-**💰ቃና -> 0.3 ብር።**
-**💰መፅሀፍ -> 5 ብር።**
-**">">">">">">">">**
-**✅ @ABRSHFILMBET**
+def finish_price_edit(m, mid):
+    try:
+        new_p = float(m.text)
+        conn.execute("UPDATE movies SET price=? WHERE id=?", (new_p, mid))
+        conn.commit()
+        bot.send_message(ADMIN_ID, "**✅ ዋጋው ተቀይሯል!**")
+    except: bot.send_message(ADMIN_ID, "**❌ ስህተት! ቁጥር ብቻ ያስገቡ።**")
 
-Write the entire code cleanly in one block. Do not leave placeholders. Implement all `register_next_step_handler` flows correctly.
+# --- 8. UPLOAD LOGIC ---
+def process_upload(m):
+    if not (m.video or m.document):
+        bot.send_message(ADMIN_ID, "❌ እባክዎ ቪዲዮ ወይም ፋይል ይላኩ!")
+        return
+    fid = m.video.file_id if m.video else m.document.file_id
+    name = m.caption if m.caption else "ያልተሰየመ"
+    user_states[ADMIN_ID] = {'fid': fid, 'name': name}
+    
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    opts = [("⚫️", 0.5), ("🟢", 0.5), ("🟡", 0.3), ("🔴", 1.0), ("🔵", 0.5), ("⚪️", 5.0)]
+    for i, p in opts:
+        kb.insert(types.InlineKeyboardButton(f"{i} {p} ብር", callback_data=f"savem_{i}_{p}"))
+    bot.send_message(ADMIN_ID, f"**🎬 {name}\nአይነት እና ዋጋ ይምረጡ፦**", reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("savem_"))
+def save_to_db(call):
+    _, cat, prc = call.data.split("_")
+    data = user_states.get(ADMIN_ID)
+    if data:
+        conn.execute("INSERT INTO movies (name, file_id, price, category) VALUES (?,?,?,?)", 
+                     (data['name'], data['fid'], float(prc), cat))
+        conn.commit()
+        bot.edit_message_text(f"**✅ {data['name']} ተጭኗል!**", call.message.chat.id, call.message.message_id)
+
+# --- 9. USER COMMANDS (SEARCH, BALANCE, DM) ---
+@bot.message_handler(func=lambda m: m.text == "※ ፊልም ልይ!")
+def search_cmd(m):
+    msg = bot.send_message(m.chat.id, "**⨳ የሚፈልጉትን ፊልም ስም ይፃፉ!**")
+    bot.register_next_step_handler(msg, perform_search)
+
+def perform_search(m):
+    query = m.text
+    res = conn.execute("SELECT id, name, category, price FROM movies WHERE name LIKE ?", (f'%{query}%',)).fetchall()
+    if not res:
+        bot.send_message(m.chat.id, "**⨳ በዚ ስም የተሰየመ ፊልም ማግኘት አልቻልኩም!\n⨳ ፊደል ተሳስተው እንዳይሆን ያረጋግጡ!**")
+        return
+    kb = types.InlineKeyboardMarkup()
+    for r in res[:10]:
+        kb.add(types.InlineKeyboardButton(f"🎬 {r[1]} {r[2]} - {r[3]} ብር", callback_data=f"buy_{r[0]}"))
+    bot.send_message(m.chat.id, f"**🔍 ውጤቶች ለ '{query}'**", reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("buy_"))
+def process_buy(call):
+    mid = call.data.split("_")[1]
+    mov = conn.execute("SELECT name, file_id, price FROM movies WHERE id=?", (mid,)).fetchone()
+    usr = conn.execute("SELECT balance FROM users WHERE user_id=?", (call.from_user.id,)).fetchone()
+    
+    if usr and usr[0] >= mov[2]:
+        new_bal = usr[0] - mov[2]
+        conn.execute("UPDATE users SET balance=? WHERE user_id=?", (new_bal, call.from_user.id))
+        conn.commit()
+        bot.send_video(call.message.chat.id, mov[1], caption=f"**🎬 {mov[0]}\n💰 ቀሪ ሂሳብ፦ {new_bal} ብር**")
+    else:
+        bot.answer_callback_query(call.id, "❌ በቂ ሂሳብ የለዎትም!", show_alert=True)
+
+@bot.message_handler(func=lambda m: m.text == "※ ያለኝ ሂሳብ!")
+def check_bal(m):
+    res = conn.execute("SELECT balance FROM users WHERE user_id=?", (m.from_user.id,)).fetchone()
+    bot.send_message(m.chat.id, f"**⨳ ቀሪ ሂሳብ ~> {res[0] if res else 0.0} ብር**")
+
+@bot.message_handler(func=lambda m: m.text == "※ DM ABRSH!")
+def dm_admin(m):
+    bot.send_message(m.chat.id, "**የዚህ ቦት Owner👉 @ABRSHFILMBET**")
+
+@bot.message_handler(func=lambda m: m.text == "※ ጎደኛዬን ልጋብዝ!")
+def invite(m):
+    link = f"https://t.me/ABRSHMovies_Bot?start=ref{m.from_user.id}"
+    txt = (
+        "**ጓደኞችዎን ይጋብዙ ና ሽልማቶች ያግኙ! 🎉**\n\n"
+        "**የአብርሽን ፊልሞች እየኮመኮሙ እንዲደሰቱ ጓደኞችዎን ይጋብዙ!**\n\n"
+        "**1 ሰው ሲጋብዙ > 0.7 ብር ያገኛሉ!**\n"
+        "**ከታች ያለውን ልዩ የግብዣ ሊንክዎን ለጓደኞችዎ ያጋሩ ።**\n\n"
+        f"**{link}**"
+    )
+    bot.send_message(m.chat.id, txt)
+
+# --- 10. PAYMENT / DEPOSIT LOGIC ---
+@bot.message_handler(func=lambda m: m.text == "※ ገቢ ላድርግ!")
+def deposit_info(m):
+    txt = (
+        "**⨳ ገቢ የሚያደርጉበት መንገድ ቴሌብር ነው!**\n\n"
+        "**በዚህ +251961343796 ስልክ ቁጥር ከ5 ብር ጀምሮ በማስገባት Screen Shoot ላኩ።**"
+    )
+    bot.send_message(m.chat.id, txt)
+
+@bot.message_handler(content_types=['photo'])
+def screenshot_handler(m):
+    kb = types.InlineKeyboardMarkup()
+    kb.row(types.InlineKeyboardButton("✅ Accept", callback_data=f"pay_acc_{m.from_user.id}"),
+           types.InlineKeyboardButton("❌ Reject", callback_data=f"pay_rej_{m.from_user.id}"))
+    bot.forward_message(ADMIN_ID, m.chat.id, m.message_id)
+    bot.send_message(ADMIN_ID, f"💰 የክፍያ ጥያቄ ከ፦ {m.from_user.first_name} (ID: {m.from_user.id})", reply_markup=kb)
+    bot.send_message(m.chat.id, "**⏳ ስክሪንሹቱ ተልኳል፣ አድሚኑ እስኪያረጋግጥ ይጠብቁ።**")
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("pay_"))
+def approve_reject(call):
+    _, action, uid = call.data.split("_")
+    if action == "acc":
+        msg = bot.send_message(ADMIN_ID, f"**ለዚህ ተጠቃሚ (ID: {uid}) ስንት ብር ይግባለት? (ቁጥር ብቻ ጻፍ)**")
+        bot.register_next_step_handler(msg, lambda m: confirm_deposit(m, uid))
+    else:
+        usr = conn.execute("SELECT first_name FROM users WHERE user_id=?", (uid,)).fetchone()
+        bot.send_message(uid, f"**ውድ {usr[0] if usr else 'ተጠቃሚ'} ጥያቄዎ አልተሳካም❎**")
+        bot.send_message(ADMIN_ID, "❌ ክፍያው ውድቅ ተደርጓል።")
+
+def confirm_deposit(m, uid):
+    try:
+        amt = float(m.text)
+        curr = conn.execute("SELECT balance FROM users WHERE user_id=?", (uid,)).fetchone()[0]
+        conn.execute("UPDATE users SET balance=? WHERE user_id=?", (curr + amt, uid))
+        conn.commit()
+        bot.send_message(uid, f"**✅ ውድ ተጠቃሚ {amt} ብር በካውንትዎ ላይ ተጨምሯል!**")
+        bot.send_message(ADMIN_ID, f"**✅ ለተጠቃሚ {uid} {amt} ብር ገቢ ሆኗል።**")
+    except: bot.send_message(ADMIN_ID, "**❌ ስህተት! ቁጥር ብቻ ያስገቡ።**")
+
+# --- 11. USAGE (RULES) ---
+@bot.message_handler(func=lambda m: m.text == "※ አጠቃቀም!")
+def usage_rules(m):
+    txt = (
+        "**🧶 የICON ከለሮች ትርጉም።**\n"
+        "**\">\">\">\">\">\">\">\">**\n"
+        "**⚫️ -> ትርጉም ተከታታይ እና ሲንግል!**\n"
+        "**🟢 -> ሲንግል!**\n"
+        "**🟡 -> ተከታታይ ትርጉም!**\n"
+        "**🔴 -> ሮማንስ ያለ ትርጉም!**\n"
+        "**🔵 -> አማርኛ!**\n"
+        "**🟣 -> ተከታታይ አማርኛ!**\n"
+        "**🟠 -> ቃና ፊልሞች!**\n"
+        "**⚪️ -> መፅሀፍት!**\n"
+        "**\">\">\">\">\">\">\">\">**\n"
+        "**💵 የፊልሞች ዋጋ**\n"
+        "**💰ሲንግል -> 0.5 ብር።**\n"
+        "**💰ተከታታይ -> 0.3 ብር።**\n"
+        "**💰አማርኛ -> 0.5 ብር።**\n"
+        "**💰ኢሮቲክ -> 1 ብር።**\n"
+        "**💰ተከታታይ አማርኛ -> 0.5 ብር።**\n"
+        "**💰ቃና -> 0.3 ብር።**\n"
+        "**💰መፅሀፍ -> 5 ብር።**\n"
+        "**\">\">\">\">\">\">\">\">**\n"
+        "**✅ @ABRSHFILMBET**"
+    )
+    bot.send_message(m.chat.id, txt)
+
+if __name__ == "__main__":
+    Thread(target=run_flask).start()
+    bot.polling(none_stop=True)
